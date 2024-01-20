@@ -3,9 +3,21 @@ package main
 import (
 	"authentication/data"
 	"database/sql"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	_ "github.com/jackc/pgconn"
+	_ "github.com/jackc/pgx/v4"
+	_ "github.com/jackc/pgx/v4/stdlib"
 )
 
 const webPort = "80"
+
+// number of retry to connect to database 
+var counts int64
 
 type Config struct {
 	DB *sql.DB
@@ -13,5 +25,65 @@ type Config struct {
 }
 
 func main() {
+	log.Println("Starting authentication service")
 
+	conn := connectToDB()
+	if conn == nil {
+		log.Panic("Cant connect to postgres")
+	}
+	
+	app := Config{
+		DB: conn,
+		Models: data.New(conn),
+	}
+
+	srv := &http.Server{
+		Addr: fmt.Sprintf(":%s", webPort),
+		Handler: app.routes(),
+	}
+
+	err := srv.ListenAndServe()
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
+func openDB(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	err = db.Ping()
+	if err != nil {
+		return nil, err
+	}
+
+	return db, nil
+} 
+
+// when we run the docker, we dont know if postgres is spin-up before the auth service
+// so we need a way to check if posgres is available before starting to connect to it.
+func connectToDB() *sql.DB {
+	dsn := os.Getenv("DSN")
+	for {
+		connection, err := openDB(dsn)
+		if err != nil {
+			log.Println("Postgres not yet ready...")
+			counts++
+		} else {
+			log.Println("Connected to Postgres")
+			return connection
+		}
+
+		if counts > 10 {
+			log.Println(err)
+			return nil
+		}
+
+		log.Println("Backing off for two seconds....")
+		// get a spare second, so then totalling of 10 * 2 = 20 seconds
+		time.Sleep(2 * time.Second)
+		continue
+	}
 }
