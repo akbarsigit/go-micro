@@ -4,5 +4,7 @@ FROM alpine:latest
 RUN mkdir /app
 # Copy the mailServiceApp executable, then paste it in app dir in our own
 COPY mailServiceApp /app
+COPY templates /templates
+
 # run the executable
 CMD ["/app/mailServiceApp"]
